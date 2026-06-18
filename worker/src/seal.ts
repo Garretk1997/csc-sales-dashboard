@@ -37,10 +37,25 @@ export async function runSeal(env: Env): Promise<{ sealDate: string; rows: numbe
   if (sealCheckErr) throw new Error(`sealed_days check: ${sealCheckErr.message}`)
   if (already && already.length) return { sealDate, rows: 0 } // immutable: never re-seal
 
-  const { data: events, error } = await db.from('call_events').select('*').eq('occurred_on', sealDate)
-  if (error) throw new Error(`seal read: ${error.message}`)
+  // PostgREST caps a single .select() at 1000 rows by default.  A busy day
+  // (e.g. 1939 call_events) would produce a partial, immutable sealed record.
+  // Page through all rows in batches of 1000 so the seal is always complete.
+  const PAGE = 1000
+  const events: any[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from('call_events')
+      .select('*')
+      .eq('occurred_on', sealDate)
+      .order('call_sid', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(`seal read (offset ${from}): ${error.message}`)
+    const batch = data ?? []
+    events.push(...batch)
+    if (batch.length < PAGE) break
+  }
 
-  const rows = aggregateDay(events ?? [], sealDate)
+  const rows = aggregateDay(events, sealDate)
   if (rows.length) {
     const { error: insErr } = await db.from('daily_sealed').insert(rows)
     if (insErr) throw new Error(`daily_sealed insert: ${insErr.message}`)
