@@ -3,6 +3,7 @@ import type { Env } from './db'
 import { runSweep } from './sweep'
 import { runSeal } from './seal'
 import { syncUsers } from './roster'
+import { runOppSweep } from './oppsweep'
 
 export default {
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
@@ -18,6 +19,7 @@ export default {
       await runSeal(env)
     } else {
       await runSweep(env)
+      await runOppSweep(env)
     }
   },
 }
