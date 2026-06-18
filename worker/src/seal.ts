@@ -79,11 +79,7 @@ export async function runSeal(env: Env): Promise<{ sealDate: string; rows: numbe
     if (batch.length < PAGE) break
   }
 
-  const rows = aggregateDay(events, sealDate)
-  if (rows.length) {
-    const { error: insErr } = await db.from('daily_sealed').insert(rows)
-    if (insErr) throw new Error(`daily_sealed insert: ${insErr.message}`)
-  }
+  const setterRows = aggregateDay(events, sealDate)
 
   // paginated read of close_events for sealDate (mirror the call_events PAGE loop)
   const closeEvents: any[] = []
@@ -94,13 +90,18 @@ export async function runSeal(env: Env): Promise<{ sealDate: string; rows: numbe
     if (batch.length < 1000) break
   }
   const closerRows = aggregateClosesDay(closeEvents, sealDate)
-  if (closerRows.length) {
-    const { error: cErr } = await db.from('daily_sealed').insert(closerRows)
-    if (cErr) throw new Error(`daily_sealed closer insert: ${cErr.message}`)
+
+  // Single atomic insert: both setter and closer rows together.
+  // A multi-row INSERT is all-or-nothing — if it throws, daily_sealed stays
+  // empty for this day and the next retry recomputes + reinserts with no PK collision.
+  const allRows = [...setterRows, ...closerRows]
+  if (allRows.length) {
+    const { error } = await db.from('daily_sealed').insert(allRows)
+    if (error) throw new Error(`daily_sealed insert: ${error.message}`)
   }
 
   // Mark the day frozen LAST: any sweep landing after this diverts to late_events.
   const { error: sdErr } = await db.from('sealed_days').insert({ seal_date_et: sealDate })
   if (sdErr) throw new Error(`sealed_days insert: ${sdErr.message}`)
-  return { sealDate, rows: rows.length + closerRows.length }
+  return { sealDate, rows: allRows.length }
 }
