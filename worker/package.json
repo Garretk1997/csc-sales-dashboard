@@ -1,0 +1,22 @@
+{
+  "name": "worker",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260617.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.101.0"
+  }
+}

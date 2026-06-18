@@ -1,0 +1,11 @@
+name = "csc-sales-dashboard-worker"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[vars]
+GHL_LOCATION_ID = "VAG1ZlpvIsGZD369uq8d"
+
+# 15-min sweep + ~3am ET seal. Cron is UTC: 07:05 UTC ~= 03:05 ET (EDT). The seal
+# job re-derives the Eastern target date internally, so a fixed-UTC cron is fine.
+[triggers]
+crons = ["*/15 * * * *", "5 7 * * *"]
