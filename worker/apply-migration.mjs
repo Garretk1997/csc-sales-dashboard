@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// db/apply-migration.mjs
-// Usage: node db/apply-migration.mjs <path-to-sql-file>
+// worker/apply-migration.mjs
+// Usage: node apply-migration.mjs <path-to-sql-file>  (run from worker/)
 // Reads SUPABASE_DB_URL from process.env (never hardcoded).
 
 import { readFileSync } from 'fs'
@@ -9,7 +9,7 @@ const { Client } = pkg
 
 const sqlFile = process.argv[2]
 if (!sqlFile) {
-  console.error('Usage: node db/apply-migration.mjs <path-to-sql-file>')
+  console.error('Usage: node apply-migration.mjs <path-to-sql-file>')
   process.exit(1)
 }
 

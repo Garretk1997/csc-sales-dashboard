@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// db/verify-immutable.mjs
+// worker/verify-immutable.mjs
 // Verifies that sealed_days rejects UPDATE and DELETE.
-// Run from worker/ so pg resolves: node ../db/verify-immutable.mjs
+// Run from worker/: node verify-immutable.mjs
 
 import pkg from 'pg'
 const { Client } = pkg
