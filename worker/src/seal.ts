@@ -28,6 +28,30 @@ export function aggregateDay(events: any[], sealDate: string): SealedRow[] {
   return [...byOwner.values()]
 }
 
+export type CloserRow = {
+  seal_date_et: string; owner_user_id: string; role: 'closer'
+  closes_won: number; closes_lost: number; dollars_recorded: number
+  closes_value_missing: number; closes_owner_inferred: number
+}
+
+export function aggregateClosesDay(events: any[], sealDate: string): CloserRow[] {
+  const by = new Map<string, CloserRow>()
+  for (const e of events) {
+    const owner = e.owner_user_id
+    if (!owner) continue
+    const r = by.get(owner) ?? { seal_date_et: sealDate, owner_user_id: owner, role: 'closer',
+      closes_won: 0, closes_lost: 0, dollars_recorded: 0, closes_value_missing: 0, closes_owner_inferred: 0 }
+    if (e.outcome === 'won') {
+      r.closes_won += 1
+      if (e.value_confidence === 'recorded') r.dollars_recorded += Number(e.monetary_value ?? 0)
+      else r.closes_value_missing += 1
+    } else if (e.outcome === 'lost') r.closes_lost += 1
+    if (e.owner_confidence === 'inferred') r.closes_owner_inferred += 1
+    by.set(owner, r)
+  }
+  return [...by.values()]
+}
+
 /** Freeze yesterday (ET). Idempotent: refuses to re-seal an already-sealed day. */
 export async function runSeal(env: Env): Promise<{ sealDate: string; rows: number }> {
   const db = createDb(env)
@@ -60,8 +84,23 @@ export async function runSeal(env: Env): Promise<{ sealDate: string; rows: numbe
     const { error: insErr } = await db.from('daily_sealed').insert(rows)
     if (insErr) throw new Error(`daily_sealed insert: ${insErr.message}`)
   }
+
+  // paginated read of close_events for sealDate (mirror the call_events PAGE loop)
+  const closeEvents: any[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from('close_events').select('*').eq('occurred_on', sealDate).order('opp_id', { ascending: true }).range(from, from + 999)
+    if (error) throw new Error(`seal close read (offset ${from}): ${error.message}`)
+    const batch = data ?? []; closeEvents.push(...batch)
+    if (batch.length < 1000) break
+  }
+  const closerRows = aggregateClosesDay(closeEvents, sealDate)
+  if (closerRows.length) {
+    const { error: cErr } = await db.from('daily_sealed').insert(closerRows)
+    if (cErr) throw new Error(`daily_sealed closer insert: ${cErr.message}`)
+  }
+
   // Mark the day frozen LAST: any sweep landing after this diverts to late_events.
   const { error: sdErr } = await db.from('sealed_days').insert({ seal_date_et: sealDate })
   if (sdErr) throw new Error(`sealed_days insert: ${sdErr.message}`)
-  return { sealDate, rows: rows.length }
+  return { sealDate, rows: rows.length + closerRows.length }
 }
