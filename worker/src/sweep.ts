@@ -10,7 +10,8 @@ export async function runSweep(env: Env): Promise<{ ingested: number; late: numb
   const raw = await fetchCallsSince(env, sinceMs)
   const events = raw.map(normalizeApiCall).filter((e) => e.callSid)
 
-  const { data: sealed } = await db.from('sealed_days').select('seal_date_et')
+  const { data: sealed, error: sealErr } = await db.from('sealed_days').select('seal_date_et')
+  if (sealErr) throw new Error(`sealed_days read failed: ${sealErr.message}`)
   const sealedSet = new Set((sealed ?? []).map((r: any) => r.seal_date_et))
 
   const fresh = events.filter((e) => !sealedSet.has(e.occurredOn))
@@ -31,9 +32,10 @@ export async function runSweep(env: Env): Promise<{ ingested: number; late: numb
     if (error) throw new Error(`call_events upsert: ${error.message}`)
   }
   if (late.length) {
-    await db.from('late_events').insert(
+    const { error: lateErr } = await db.from('late_events').insert(
       late.map((e) => ({ belongs_to_date_et: e.occurredOn, payload: e as any, reason: 'post_seal_api_sweep' })),
     )
+    if (lateErr) throw new Error(`late_events insert: ${lateErr.message}`)
   }
   return { ingested: fresh.length, late: late.length }
 }
