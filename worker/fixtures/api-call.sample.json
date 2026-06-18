@@ -1,0 +1,11 @@
+{
+  "id": "msg_abc123",
+  "conversationId": "conv_xyz",
+  "contactId": "REDACTED",
+  "messageType": "TYPE_CALL",
+  "userId": "UuQM0jbFS7PeBsy6uagx",
+  "direction": "outbound",
+  "dateAdded": "2026-06-17T03:55:00.000Z",
+  "altId": "CA0123456789abcdef0123456789abcdef",
+  "meta": { "call": { "duration": 91, "status": "completed" } }
+}
