@@ -33,7 +33,8 @@ export async function runSeal(env: Env): Promise<{ sealDate: string; rows: numbe
   const db = createDb(env)
   const sealDate = previousEasternDate(easternDateString(new Date()))
 
-  const { data: already } = await db.from('sealed_days').select('seal_date_et').eq('seal_date_et', sealDate)
+  const { data: already, error: sealCheckErr } = await db.from('sealed_days').select('seal_date_et').eq('seal_date_et', sealDate)
+  if (sealCheckErr) throw new Error(`sealed_days check: ${sealCheckErr.message}`)
   if (already && already.length) return { sealDate, rows: 0 } // immutable: never re-seal
 
   const { data: events, error } = await db.from('call_events').select('*').eq('occurred_on', sealDate)
