@@ -4,3 +4,8 @@ node_modules/
 .wrangler/
 *.local
 spike/raw/
+
+# throwaway worker spike scripts (live-DB tests)
+worker/spike/raw/
+.dev.vars
+worker/.dev.vars

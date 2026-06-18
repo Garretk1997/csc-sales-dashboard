@@ -1,5 +1,6 @@
 // worker/src/ghl.ts
 import type { Env } from './db'
+import { bumpSubrequest } from './subreq'
 
 const BASE = 'https://services.leadconnectorhq.com'
 const VERSION = '2021-07-28'
@@ -34,6 +35,7 @@ async function getJson(env: Env, path: string, params: Record<string, string>): 
   const url = `${BASE}${path}?${new URLSearchParams(params)}`
   for (let attempt = 0; attempt < 6; attempt++) {
     await sleep(130) // ~8 rps ceiling, shared 100/10s window
+    bumpSubrequest()
     const res = await fetch(url, { headers: headers(env.GHL_PIT) })
     if (res.status === 200) return res.json()
     if (res.status === 429) {

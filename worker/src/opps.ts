@@ -1,6 +1,7 @@
 // worker/src/opps.ts
 import type { Env } from './db'
 import { parseRetryAfter } from './ghl'
+import { bumpSubrequest } from './subreq'
 const BASE = 'https://services.leadconnectorhq.com'
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -8,6 +9,7 @@ async function getJson(env: Env, params: Record<string,string>): Promise<any> {
   const url = `${BASE}/opportunities/search?${new URLSearchParams(params)}`
   for (let a = 0; a < 6; a++) {
     await sleep(130)
+    bumpSubrequest()
     const res = await fetch(url, { headers: { Authorization: `Bearer ${env.GHL_PIT}`, Version: '2021-07-28', Accept: 'application/json' } })
     if (res.status === 200) return res.json()
     if (res.status === 429) { await sleep(parseRetryAfter(res.headers.get('retry-after'), 11) * 1000); continue }

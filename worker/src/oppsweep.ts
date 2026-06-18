@@ -4,12 +4,10 @@ import { loadRegistry } from './pipelines'
 import { fetchActiveOpps } from './opps'
 import { classifyClose, isOpenInRevenue } from './closes'
 
-export async function runOppSweep(env: Env): Promise<{ snapshots: number; closes: number; late: number }> {
+export async function runOppSweep(env: Env, sinceMs = Date.now() - 2 * 60 * 60 * 1000): Promise<{ snapshots: number; closes: number; late: number }> {
   const db = createDb(env)
   const reg = await loadRegistry(env)
-  // 2-hour rolling window. Continuous 15-min sweeps with 2h overlap keep opp_snapshots/close_events
-  // current; a periodic wider catch-up for gaps >2h is a documented follow-up.
-  const sinceMs = Date.now() - 2 * 60 * 60 * 1000
+  // sinceMs from the cursor checkpoint (shared with the call sweep). Falls back to 2h.
   const opps = await fetchActiveOpps(env, reg.revenuePipelineIds, sinceMs)
 
   // 1. snapshot open opps

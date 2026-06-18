@@ -3,12 +3,11 @@ import { createDb, type Env } from './db'
 import { fetchCallsSince } from './ghl'
 import { normalizeApiCall } from './normalize'
 
-export async function runSweep(env: Env): Promise<{ ingested: number; late: number }> {
+export async function runSweep(env: Env, sinceMs = Date.now() - 2 * 60 * 60 * 1000): Promise<{ ingested: number; late: number }> {
   const db = createDb(env)
-  // Window: rolling 2h. Continuous 15-min sweeps with 2h overlap keep call_events current within
-  // the day. Recovery of gaps longer than 2h (e.g. a multi-hour worker outage) is a documented
-  // follow-up — a periodic wider catch-up sweep run manually or via a separate cron.
-  const sinceMs = Date.now() - 2 * 60 * 60 * 1000
+  // sinceMs comes from the cursor checkpoint (last successful sweep − overlap), so each
+  // tick only fetches messages since the last run instead of re-walking the full window.
+  // Falls back to a rolling 2h window if no checkpoint is provided.
   const raw = await fetchCallsSince(env, sinceMs)
   const events = raw.map(normalizeApiCall).filter((e) => e.callSid)
 
