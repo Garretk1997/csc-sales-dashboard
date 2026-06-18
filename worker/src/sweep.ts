@@ -5,12 +5,34 @@ import { normalizeApiCall } from './normalize'
 
 export async function runSweep(env: Env): Promise<{ ingested: number; late: number }> {
   const db = createDb(env)
-  // Window: last 30h covers today + the pre-seal tail of yesterday.
-  const sinceMs = Date.now() - 30 * 60 * 60 * 1000
+  // Window: rolling 2h. Continuous 15-min sweeps with 2h overlap keep call_events current within
+  // the day. Recovery of gaps longer than 2h (e.g. a multi-hour worker outage) is a documented
+  // follow-up — a periodic wider catch-up sweep run manually or via a separate cron.
+  const sinceMs = Date.now() - 2 * 60 * 60 * 1000
   const raw = await fetchCallsSince(env, sinceMs)
   const events = raw.map(normalizeApiCall).filter((e) => e.callSid)
 
-  const { data: sealed, error: sealErr } = await db.from('sealed_days').select('seal_date_et')
+  // sealed_days read happens here — as late as possible, immediately before the fresh/late
+  // partition — to minimise the window of the seal/sweep race described below.
+  //
+  // RESIDUAL RACE (documented; not fixed here):
+  // If a sweep reads sealed_days microseconds before the 3am seal job marks yesterday as sealed,
+  // then upserts call_events after the seal has already read call_events, a yesterday-call can
+  // land in call_events that is neither captured in daily_sealed (seal already ran) nor in
+  // late_events (sweep saw it as "fresh"). The production fix is cron sequencing or a DB advisory
+  // lock so the seal does not run while a sweep is in flight. That is a deploy-time task and is
+  // NOT implemented here.
+  //
+  // Bound to recent 45 days: PostgREST has a 1000-row default cap; an unbounded select would
+  // silently drop the most-recent sealed days after ~1000 sealed dates (~2.7 years), breaking
+  // late-diversion. Since the sweep window is ≤2h, only very recent sealed days matter.
+  const fortyFiveDaysAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10) // YYYY-MM-DD
+  const { data: sealed, error: sealErr } = await db
+    .from('sealed_days')
+    .select('seal_date_et')
+    .gte('seal_date_et', fortyFiveDaysAgo)
   if (sealErr) throw new Error(`sealed_days read failed: ${sealErr.message}`)
   const sealedSet = new Set((sealed ?? []).map((r: any) => r.seal_date_et))
 

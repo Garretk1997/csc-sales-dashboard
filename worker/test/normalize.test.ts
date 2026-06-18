@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { normalizeApiCall, mergeCallEvent, type CallEvent } from '../src/normalize'
 
-const raw = JSON.parse(readFileSync(new URL('../fixtures/api-call.sample.json', import.meta.url), 'utf8'))
+// Cast via unknown to reconcile the global URL declared by @cloudflare/workers-types with
+// the node:url URL expected by fileURLToPath — both are structurally URL at runtime.
+const raw = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/api-call.sample.json', import.meta.url) as unknown as import('node:url').URL), 'utf8'))
 
 describe('normalizeApiCall', () => {
   it('keys on the Twilio CallSid (altId), not the GHL message id', () => {

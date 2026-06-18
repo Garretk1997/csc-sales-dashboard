@@ -11,7 +11,9 @@ export function easternDateString(d: Date): string {
 
 /** The calendar date string immediately before the given YYYY-MM-DD. */
 export function previousEasternDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
+  const parts = dateStr.split('-').map(Number)
+  if (parts.length !== 3) throw new Error(`previousEasternDate: malformed date "${dateStr}"`)
+  const [y, m, d] = parts as [number, number, number]
   // Anchor at noon UTC to avoid any TZ/DST edge when subtracting a day.
   const anchor = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
   anchor.setUTCDate(anchor.getUTCDate() - 1)

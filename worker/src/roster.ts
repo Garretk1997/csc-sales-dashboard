@@ -7,7 +7,12 @@ export async function syncUsers(env: Env): Promise<number> {
     { headers: { Authorization: `Bearer ${env.GHL_PIT}`, Version: '2021-07-28', Accept: 'application/json' } },
   )
   if (!res.ok) throw new Error(`users fetch -> ${res.status}`)
-  const users: any[] = (await res.json())?.users ?? []
+  const users: any[] = (await res.json() as { users?: any[] })?.users ?? []
+  // Pagination guard: the endpoint is not paginated in normal use (~32 users), but if a future
+  // location grows and the API silently truncates at a page boundary this will surface it.
+  if (users.length >= 100) {
+    console.warn(`syncUsers: received ${users.length} users — /users/ may be paginated and silently truncated; verify roster completeness`)
+  }
   const db = createDb(env)
   const rows = users.map((u) => ({
     ghl_user_id: String(u.id),

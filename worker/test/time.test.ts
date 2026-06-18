@@ -14,4 +14,7 @@ describe('eastern day helpers', () => {
     expect(previousEasternDate('2026-06-17')).toBe('2026-06-16')
     expect(previousEasternDate('2026-03-01')).toBe('2026-02-28')
   })
+  it('correctly steps back to Feb 29 in a leap year', () => {
+    expect(previousEasternDate('2024-03-01')).toBe('2024-02-29')
+  })
 })

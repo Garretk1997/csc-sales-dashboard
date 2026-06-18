@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "deploy": "wrangler deploy"
   },
   "keywords": [],
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260617.1",
+    "@types/node": "^25.9.3",
     "pg": "^8.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9",
