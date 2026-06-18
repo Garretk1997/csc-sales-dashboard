@@ -1,5 +1,6 @@
 // worker/src/opps.ts
 import type { Env } from './db'
+import { parseRetryAfter } from './ghl'
 const BASE = 'https://services.leadconnectorhq.com'
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -9,7 +10,7 @@ async function getJson(env: Env, params: Record<string,string>): Promise<any> {
     await sleep(130)
     const res = await fetch(url, { headers: { Authorization: `Bearer ${env.GHL_PIT}`, Version: '2021-07-28', Accept: 'application/json' } })
     if (res.status === 200) return res.json()
-    if (res.status === 429) { await sleep(Number(res.headers.get('retry-after') ?? 11) * 1000); continue }
+    if (res.status === 429) { await sleep(parseRetryAfter(res.headers.get('retry-after'), 11) * 1000); continue }
     if ([500,502,503,504].includes(res.status)) { await sleep(600 + 500*a); continue }
     throw new Error(`opp search -> ${res.status}`)
   }
@@ -17,7 +18,7 @@ async function getJson(env: Env, params: Record<string,string>): Promise<any> {
 }
 
 function oppActivityMs(o: any): number {
-  return Math.max(Date.parse(o?.lastStageChangeAt ?? '') || 0, Date.parse(o?.updatedAt ?? '') || 0)
+  return Math.max(Date.parse(o?.lastStageChangeAt ?? '') || 0, Date.parse(o?.createdAt ?? '') || 0)
 }
 
 export async function fetchActiveOpps(env: Env, pipelineIds: Set<string>, sinceMs: number): Promise<any[]> {
