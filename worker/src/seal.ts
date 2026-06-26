@@ -30,6 +30,11 @@ export function aggregateDay(events: any[], sealDate: string): SealedRow[] {
 
 export type CloserRow = {
   seal_date_et: string; owner_user_id: string; role: 'closer'
+  // calls/answered/talk_time_seconds are NOT NULL on daily_sealed. A batched insert
+  // unions columns across setter+closer rows, so an omitted key is sent as NULL (the
+  // column default does NOT apply) → NOT NULL violation that fails the WHOLE day's
+  // seal. Closer rows carry explicit 0s for the call columns so the insert is valid.
+  calls: number; answered: number; talk_time_seconds: number
   closes_won: number; closes_lost: number; dollars_recorded: number
   closes_value_missing: number; closes_owner_inferred: number
 }
@@ -40,6 +45,7 @@ export function aggregateClosesDay(events: any[], sealDate: string): CloserRow[]
     const owner = e.owner_user_id
     if (!owner) continue
     const r = by.get(owner) ?? { seal_date_et: sealDate, owner_user_id: owner, role: 'closer',
+      calls: 0, answered: 0, talk_time_seconds: 0,
       closes_won: 0, closes_lost: 0, dollars_recorded: 0, closes_value_missing: 0, closes_owner_inferred: 0 }
     if (e.outcome === 'won') {
       r.closes_won += 1

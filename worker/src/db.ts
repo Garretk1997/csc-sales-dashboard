@@ -7,6 +7,7 @@ export type Env = {
   SUPABASE_URL: string
   SUPABASE_SERVICE_KEY: string
   ALERT_WEBHOOK_URL?: string // optional: POSTed on seal/sweep failure
+  TRIGGER_SECRET?: string // optional: gates the HTTP trigger for external schedulers
 }
 
 export function createDb(env: Env): SupabaseClient {

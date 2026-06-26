@@ -43,6 +43,14 @@ async function getJson(env: Env, path: string, params: Record<string, string>): 
       continue
     }
     if ([500, 502, 503, 504].includes(res.status)) { await sleep(600 + 500 * attempt); continue }
+    // GHL intermittently returns 401 on a VALID token — a transient auth check
+    // under load that succeeds on immediate retry (proven: conversations that 401
+    // return 200 on the very next call). Treat 401/403 as retryable. Without this,
+    // a single transient 401 thrown mid-sweep aborts the ENTIRE fetchCallsSince and
+    // the whole 15-min tick ingests 0 calls — the root cause of the post-2026-06-17
+    // call under-capture (sealed 28/14/1/77 vs the real thousands). A genuinely
+    // revoked token still exhausts all attempts and throws.
+    if (res.status === 401 || res.status === 403) { await sleep(500 + 400 * attempt); continue }
     throw new Error(`GET ${path} -> ${res.status}`)
   }
   throw new Error(`GET ${path} exhausted retries`)
@@ -99,9 +107,18 @@ export async function fetchCallsSince(env: Env, sinceMs: number): Promise<any[]>
       if (sortVal !== undefined && sortVal !== null) cursor = String(sortVal)
       if ((c?.lastMessageDate ?? 0) < sinceMs) continue
       allBeforeWindow = false
-      for await (const m of iterCallMessages(env, c.id)) {
-        const ts = Date.parse(m?.dateAdded ?? '')
-        if (Number.isFinite(ts) && ts >= sinceMs) out.push(m)
+      try {
+        for await (const m of iterCallMessages(env, c.id)) {
+          const ts = Date.parse(m?.dateAdded ?? '')
+          if (Number.isFinite(ts) && ts >= sinceMs) out.push(m)
+        }
+      } catch (err) {
+        // Safety net: with 401/403 now retried in getJson, an exception here means a
+        // conversation is genuinely stuck (exhausted retries / non-retryable status).
+        // Skipping it (and logging) is better than letting one bad conversation throw
+        // and abort the whole sweep — which would drop EVERY other conversation's
+        // calls this tick and (on repeated failure) freeze ingestion entirely.
+        console.error(`fetchCallsSince: skipping conversation ${c.id}: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
     // Cursor stall guard: if the cursor did not advance after a full page,

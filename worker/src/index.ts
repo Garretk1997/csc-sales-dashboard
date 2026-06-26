@@ -10,13 +10,17 @@ import { resolveSweepSince } from './checkpoint'
 import { resetSubrequests, subrequestCount } from './subreq'
 
 const SEAL_CRON = '5 7 * * *' // ~03:05 ET — roster sync then seal, ALONE
+const SWEEP_CRON = '*/15 * * * *'
 
-export default {
-  async scheduled(event: ScheduledController, env: Env): Promise<void> {
-    const db = createDb(env)
-    const holder = crypto.randomUUID()
+// One pipeline tick (sweep or seal). Shared by the Cloudflare cron AND the HTTP
+// trigger below, so an EXTERNAL scheduler can drive the pipeline when Cloudflare's
+// own cron stalls (it intermittently stops firing for this worker). Idempotent +
+// lock-guarded, so an external ping overlapping a real cron is safe.
+async function runTick(env: Env, cron: string, opts?: { sinceMs?: number }): Promise<void> {
+  const db = createDb(env)
+  const holder = crypto.randomUUID()
 
-    if (event.cron === SEAL_CRON) {
+  if (cron === SEAL_CRON) {
       // SEAL: acquire the pipeline lock with priority. acquireForSeal waits out an
       // in-flight sweep (so its yesterday rows get sealed) and steals an expired
       // crashed-sweep lock — then the seal runs with NO sweep writing concurrently.
@@ -57,8 +61,14 @@ export default {
     try {
       resetSubrequests()
       // cursor checkpoint: fetch only since the last successful sweep (− overlap),
-      // bounded so a long outage can't trigger an unbounded re-walk.
-      const { sinceMs, basis, windowMin } = await resolveSweepSince(db, Date.now())
+      // bounded so a long outage can't trigger an unbounded re-walk. A forced
+      // sinceMs (HTTP trigger ?minutes=N) overrides it — used to escape a stuck
+      // catch-up that exceeds the subrequest cap after a long dark-out.
+      const forced = opts?.sinceMs
+      const { sinceMs, basis, windowMin } =
+        forced != null
+          ? { sinceMs: forced, basis: "forced", windowMin: Math.round((Date.now() - forced) / 60000) }
+          : await resolveSweepSince(db, Date.now())
       const s = await runSweep(env, sinceMs)
       const o = await runOppSweep(env, sinceMs)
       await recordRun(db, 'sweep', 'ok', { detail: { ...s, ...o, requests: subrequestCount(), window_min: windowMin, basis } })
@@ -69,6 +79,32 @@ export default {
       throw err
     } finally {
       await releaseLock(db, holder)
+    }
+}
+
+export default {
+  async scheduled(event: ScheduledController, env: Env): Promise<void> {
+    await runTick(env, event.cron)
+  },
+
+  // Secret-gated HTTP trigger so an external scheduler (cron-job.org / GitHub
+  // Action / Vercel Cron) can run a tick when Cloudflare's cron stalls.
+  //   GET /?key=<TRIGGER_SECRET>           -> sweep
+  //   GET /?key=<TRIGGER_SECRET>&job=seal  -> seal
+  async fetch(req: Request, env: Env): Promise<Response> {
+    const url = new URL(req.url)
+    const key = url.searchParams.get('key') ?? req.headers.get('x-trigger-key') ?? ''
+    if (!env.TRIGGER_SECRET || key !== env.TRIGGER_SECRET) {
+      return new Response('forbidden\n', { status: 403 })
+    }
+    const cron = url.searchParams.get('job') === 'seal' ? SEAL_CRON : SWEEP_CRON
+    const minutes = Number(url.searchParams.get('minutes'))
+    const opts = Number.isFinite(minutes) && minutes > 0 ? { sinceMs: Date.now() - minutes * 60000 } : undefined
+    try {
+      await runTick(env, cron, opts)
+      return new Response('ok\n')
+    } catch (err) {
+      return new Response(`error: ${err instanceof Error ? err.message : String(err)}\n`, { status: 500 })
     }
   },
 }

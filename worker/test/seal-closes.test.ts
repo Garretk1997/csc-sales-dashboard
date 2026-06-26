@@ -20,4 +20,8 @@ describe('aggregateClosesDay', () => {
   it('drops null-owner closes (unattributable)', () => {
     expect(aggregateClosesDay([ev({ owner_user_id: null })], '2026-06-17')).toHaveLength(0)
   })
+  it('carries explicit 0 call columns (NOT NULL on daily_sealed — else the batched seal insert fails the whole day)', () => {
+    const [row] = aggregateClosesDay([ev({})], '2026-06-17')
+    expect(row).toMatchObject({ calls: 0, answered: 0, talk_time_seconds: 0 })
+  })
 })

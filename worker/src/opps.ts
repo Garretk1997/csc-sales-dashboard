@@ -14,6 +14,9 @@ async function getJson(env: Env, params: Record<string,string>): Promise<any> {
     if (res.status === 200) return res.json()
     if (res.status === 429) { await sleep(parseRetryAfter(res.headers.get('retry-after'), 11) * 1000); continue }
     if ([500,502,503,504].includes(res.status)) { await sleep(600 + 500*a); continue }
+    // GHL intermittently 401s a valid token under load (see ghl.ts) — retry, else a
+    // transient blip aborts the opp sweep (live: "opp search -> 401" on 2026-06-23).
+    if (res.status === 401 || res.status === 403) { await sleep(500 + 400*a); continue }
     throw new Error(`opp search -> ${res.status}`)
   }
   throw new Error('opp search exhausted retries')
