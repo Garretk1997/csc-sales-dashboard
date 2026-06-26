@@ -1,0 +1,28 @@
+name: credit-sweep
+# Hourly sweep that keeps opportunity ownership = credit correct as leads cross
+# pipelines (esp. webinar opps that are born unassigned). PIT-based, idempotent —
+# only touches opps that are currently unassigned or owned by a deleted user.
+on:
+  schedule:
+    - cron: '17 * * * *'   # hourly at :17
+  workflow_dispatch: {}
+
+# Don't let two sweeps overlap.
+concurrency:
+  group: credit-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run credit sweep
+        env:
+          GHL_PIT: ${{ secrets.GHL_PIT }}
+          GHL_LOCATION_ID: ${{ secrets.GHL_LOCATION_ID }}
+        run: python3 .github/scripts/credit_sweep.py --execute
