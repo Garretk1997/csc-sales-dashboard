@@ -4,13 +4,18 @@ name: pipeline-keepalive
 # dark every ~12-15h). This pings the worker's secret-gated HTTP trigger every
 # 15 min as a reliable backup so a CF cron stall can't dark the data pipeline.
 # The trigger is idempotent + lock-guarded, so overlapping a real CF cron is safe.
+#
+# ALERTING (free, zero-setup): if the worker can't be reached / keeps erroring
+# after 3 tries, this job FAILS — and GitHub emails the repo owner about the
+# failed scheduled workflow. So a real outage pings you with no Slack/Discord/
+# webhook needed. (Make sure GitHub > Settings > Notifications > Actions is on —
+# it is by default.)
 
 on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
-# don't pile up runs if one is slow
 concurrency:
   group: keepalive
   cancel-in-progress: false
@@ -18,16 +23,23 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 4
     steps:
-      - name: Trigger sweep
+      - name: Trigger sweep (fail = email alert)
         env:
           TRIGGER_KEY: ${{ secrets.TRIGGER_KEY }}
           WORKER_URL: https://csc-sales-dashboard-worker.krahamgarret1.workers.dev
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 110 \
-            "$WORKER_URL/?key=$TRIGGER_KEY")
-          echo "sweep trigger -> HTTP $code"
-          # 200 = ran. Tolerate a transient non-200 (next run is 15 min away);
-          # don't fail the workflow over one blip.
-          if [ "$code" != "200" ]; then echo "::warning::trigger returned HTTP $code"; fi
+          ok=0
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/resp -w "%{http_code}" --max-time 110 "$WORKER_URL/?key=$TRIGGER_KEY" || echo 000)
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 12
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::CSC pipeline trigger failed 3x — the worker is unreachable or its sweep is erroring. The dashboard may be going dark."
+            echo "Last worker response:"; cat /tmp/resp 2>/dev/null || true
+            exit 1
+          fi
+          echo "sweep ran OK"
