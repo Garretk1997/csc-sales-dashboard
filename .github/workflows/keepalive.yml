@@ -1,0 +1,33 @@
+name: pipeline-keepalive
+
+# Cloudflare's own cron intermittently stalls for this worker (the pipeline goes
+# dark every ~12-15h). This pings the worker's secret-gated HTTP trigger every
+# 15 min as a reliable backup so a CF cron stall can't dark the data pipeline.
+# The trigger is idempotent + lock-guarded, so overlapping a real CF cron is safe.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+# don't pile up runs if one is slow
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger sweep
+        env:
+          TRIGGER_KEY: ${{ secrets.TRIGGER_KEY }}
+          WORKER_URL: https://csc-sales-dashboard-worker.krahamgarret1.workers.dev
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 110 \
+            "$WORKER_URL/?key=$TRIGGER_KEY")
+          echo "sweep trigger -> HTTP $code"
+          # 200 = ran. Tolerate a transient non-200 (next run is 15 min away);
+          # don't fail the workflow over one blip.
+          if [ "$code" != "200" ]; then echo "::warning::trigger returned HTTP $code"; fi
