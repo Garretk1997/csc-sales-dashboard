@@ -19,14 +19,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  */
 export function parseRetryAfter(raw: string | null, fallback = 11): number {
   if (raw === null) return fallback
+  // Capped at 60s: honor reasonable server guidance but never park a tick long
+  // enough to overrun the next cron or let the sweep lock TTL expire mid-flight.
+  const CAP = 60
   // Try numeric first (most common: "30", "0")
   const numeric = Number(raw)
-  if (Number.isFinite(numeric) && numeric > 0) return numeric
+  if (Number.isFinite(numeric) && numeric > 0) return Math.min(numeric, CAP)
   // Try HTTP-date (e.g. "Wed, 18 Jun 2026 12:00:00 GMT")
   const date = Date.parse(raw)
   if (Number.isFinite(date)) {
     const seconds = (date - Date.now()) / 1000
-    if (seconds > 0) return seconds
+    if (seconds > 0) return Math.min(seconds, CAP)
   }
   return fallback
 }

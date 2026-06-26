@@ -11,6 +11,16 @@ import { resetSubrequests, subrequestCount } from './subreq'
 
 const SEAL_CRON = '5 7 * * *' // ~03:05 ET — roster sync then seal, ALONE
 const SWEEP_CRON = '*/15 * * * *'
+const MAX_FORCED_MIN = 180 // forced ?minutes window is clamped to the same 3h cap as the cursor
+
+// Constant-time string compare so the HTTP trigger's secret check doesn't leak
+// timing. Length mismatch returns false fast (the secret is high-entropy).
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
 
 // One pipeline tick (sweep or seal). Shared by the Cloudflare cron AND the HTTP
 // trigger below, so an EXTERNAL scheduler can drive the pipeline when Cloudflare's
@@ -94,12 +104,15 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url)
     const key = url.searchParams.get('key') ?? req.headers.get('x-trigger-key') ?? ''
-    if (!env.TRIGGER_SECRET || key !== env.TRIGGER_SECRET) {
+    if (!env.TRIGGER_SECRET || !safeEqual(key, env.TRIGGER_SECRET)) {
       return new Response('forbidden\n', { status: 403 })
     }
     const cron = url.searchParams.get('job') === 'seal' ? SEAL_CRON : SWEEP_CRON
-    const minutes = Number(url.searchParams.get('minutes'))
-    const opts = Number.isFinite(minutes) && minutes > 0 ? { sinceMs: Date.now() - minutes * 60000 } : undefined
+    const raw = Number(url.searchParams.get('minutes'))
+    // clamp the manual catch-up window so a fat-fingered ?minutes can't blow the
+    // subrequest cap and crash mid-sweep (the orphaned-lock scenario).
+    const minutes = Number.isFinite(raw) && raw > 0 ? Math.min(raw, MAX_FORCED_MIN) : 0
+    const opts = minutes > 0 ? { sinceMs: Date.now() - minutes * 60000 } : undefined
     try {
       await runTick(env, cron, opts)
       return new Response('ok\n')
