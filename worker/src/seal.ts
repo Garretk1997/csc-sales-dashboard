@@ -58,6 +58,63 @@ export function aggregateClosesDay(events: any[], sealDate: string): CloserRow[]
   return [...by.values()]
 }
 
+// ---- Stream 3: meetings booked / held (appointments) ----------------------
+//
+// Two independent day-attributions from appt_events:
+// - meetings_booked: keyed by booked_by_user_id over booked_on (setter credit,
+//   frozen at sweep time — first-write-wins on the raw row).
+// - meetings_held/showed/noshow: keyed by held_by_user_id over start_on
+//   (closer credit; cancelled appts are excluded from held).
+// Both MERGE into the existing setter/closer row maps so the
+// (seal_date_et, owner_user_id, role) PK never collides. Owners with meetings
+// but no calls/closes that day get a fresh row with explicit 0s (NOT NULL
+// columns — same batched-insert union reason as CloserRow above). Every row
+// carries the meetings columns (0 default) so the insert's column union is
+// consistent.
+
+export function mergeApptsBooked(setterRows: SealedRow[], appts: any[], sealDate: string): (SealedRow & { meetings_booked: number })[] {
+  const by = new Map<string, SealedRow & { meetings_booked: number }>(
+    setterRows.map((r) => [r.owner_user_id, { ...r, meetings_booked: 0 }]),
+  )
+  for (const a of appts) {
+    if (a.booked_on !== sealDate) continue
+    const owner = a.booked_by_user_id
+    if (!owner) continue // unattributed -> cannot enter the record (visible in appt_events)
+    const row = by.get(owner) ?? {
+      seal_date_et: sealDate, owner_user_id: owner, role: 'setter',
+      calls: 0, answered: 0, talk_time_seconds: 0, meetings_booked: 0,
+    }
+    row.meetings_booked += 1
+    by.set(owner, row)
+  }
+  return [...by.values()]
+}
+
+const HELD_EXCLUDED = new Set(['cancelled', 'invalid'])
+
+export function mergeApptsHeld(closerRows: CloserRow[], appts: any[], sealDate: string): (CloserRow & { meetings_held: number; meetings_showed: number; meetings_noshow: number })[] {
+  const by = new Map<string, CloserRow & { meetings_held: number; meetings_showed: number; meetings_noshow: number }>(
+    closerRows.map((r) => [r.owner_user_id, { ...r, meetings_held: 0, meetings_showed: 0, meetings_noshow: 0 }]),
+  )
+  for (const a of appts) {
+    if (a.start_on !== sealDate) continue
+    if (HELD_EXCLUDED.has(a.appointment_status)) continue
+    const owner = a.held_by_user_id
+    if (!owner) continue
+    const row = by.get(owner) ?? {
+      seal_date_et: sealDate, owner_user_id: owner, role: 'closer' as const,
+      calls: 0, answered: 0, talk_time_seconds: 0,
+      closes_won: 0, closes_lost: 0, dollars_recorded: 0, closes_value_missing: 0, closes_owner_inferred: 0,
+      meetings_held: 0, meetings_showed: 0, meetings_noshow: 0,
+    }
+    row.meetings_held += 1
+    if (a.appointment_status === 'showed') row.meetings_showed += 1
+    if (a.appointment_status === 'noshow') row.meetings_noshow += 1
+    by.set(owner, row)
+  }
+  return [...by.values()]
+}
+
 /** Freeze yesterday (ET). Idempotent: refuses to re-seal an already-sealed day. */
 export async function runSeal(env: Env): Promise<{ sealDate: string; rows: number }> {
   const db = createDb(env)
@@ -97,10 +154,27 @@ export async function runSeal(env: Env): Promise<{ sealDate: string; rows: numbe
   }
   const closerRows = aggregateClosesDay(closeEvents, sealDate)
 
+  // Stream 3: appt_events touching sealDate on either day-attribution
+  // (booked_on -> setter meetings_booked; start_on -> closer held/showed/noshow).
+  const apptEvents: any[] = []
+  for (const col of ['booked_on', 'start_on'] as const) {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db.from('appt_events').select('*').eq(col, sealDate).order('appt_id', { ascending: true }).range(from, from + 999)
+      if (error) throw new Error(`seal appt read (${col}, offset ${from}): ${error.message}`)
+      const batch = data ?? []; apptEvents.push(...batch)
+      if (batch.length < 1000) break
+    }
+  }
+  // de-dup rows matched by both columns (booked and starts the same day)
+  const apptById = new Map(apptEvents.map((a) => [a.appt_id, a]))
+  const appts = [...apptById.values()]
+  const setterRowsWithMeetings = mergeApptsBooked(setterRows, appts, sealDate)
+  const closerRowsWithMeetings = mergeApptsHeld(closerRows, appts, sealDate)
+
   // Single atomic insert: both setter and closer rows together.
   // A multi-row INSERT is all-or-nothing — if it throws, daily_sealed stays
   // empty for this day and the next retry recomputes + reinserts with no PK collision.
-  const allRows = [...setterRows, ...closerRows]
+  const allRows = [...setterRowsWithMeetings, ...closerRowsWithMeetings]
   if (allRows.length) {
     const { error } = await db.from('daily_sealed').insert(allRows)
     if (error) throw new Error(`daily_sealed insert: ${error.message}`)

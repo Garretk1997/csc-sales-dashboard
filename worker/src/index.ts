@@ -4,6 +4,7 @@ import { runSweep } from './sweep'
 import { runSeal } from './seal'
 import { syncUsers } from './roster'
 import { runOppSweep } from './oppsweep'
+import { runApptSweep } from './apptsweep'
 import { acquireForSeal, tryAcquireLock, releaseLock, SWEEP_TTL_SEC } from './locks'
 import { recordRun, sendAlert } from './report'
 import { resolveSweepSince } from './checkpoint'
@@ -81,7 +82,10 @@ async function runTick(env: Env, cron: string, opts?: { sinceMs?: number }): Pro
           : await resolveSweepSince(db, Date.now())
       const s = await runSweep(env, sinceMs)
       const o = await runOppSweep(env, sinceMs)
-      await recordRun(db, 'sweep', 'ok', { detail: { ...s, ...o, requests: subrequestCount(), window_min: windowMin, basis } })
+      // Appointments use a rolling window (no cursor exists on /calendars/events),
+      // so runApptSweep ignores sinceMs by design.
+      const a = await runApptSweep(env)
+      await recordRun(db, 'sweep', 'ok', { detail: { ...s, ...o, ...a, requests: subrequestCount(), window_min: windowMin, basis } })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       await recordRun(db, 'sweep', 'error', { detail: { message, requests: subrequestCount() } })
