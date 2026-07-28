@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { classifyAppt } from '../src/appts'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { classifyAppt, fetchApptEvents } from '../src/appts'
+import { CALENDARS } from '../src/calendars'
 
 const raw = (over: Record<string, unknown> = {}) => ({
   id: 'appt_1',
@@ -53,5 +54,37 @@ describe('classifyAppt', () => {
     expect(classifyAppt(raw({ deleted: true }), 'closer')).toBeNull()
     expect(classifyAppt(raw({ id: undefined }), 'closer')).toBeNull()
     expect(classifyAppt(raw({ dateAdded: undefined }), 'closer')).toBeNull()
+  })
+})
+
+describe('fetchApptEvents resilience', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  // Regression for the 2026-07-21 mirror freeze: when two setters left, GHL deleted
+  // their calendars and /calendars/events returned 400 "The calendar is deleted." for
+  // those ids. One 400 threw out of the per-calendar loop and aborted the WHOLE sweep,
+  // freezing appt_events for days. A dead calendar must be skipped, not fatal.
+  it('skips a calendar that 400s "calendar is deleted" and still returns the others', async () => {
+    const deadId = CALENDARS[1].id
+    const liveId = CALENDARS[0].id
+    const liveEvent = {
+      id: 'appt_live', calendarId: liveId, contactId: 'c_1', assignedUserId: 'closer_1',
+      appointmentStatus: 'confirmed', dateAdded: '2026-07-24T18:00:00.000Z',
+      startTime: '2026-07-25T15:00:00.000Z', createdBy: { userId: 'setter_1' }, deleted: false,
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const calId = new URL(url).searchParams.get('calendarId')
+      if (calId === deadId) {
+        return new Response(JSON.stringify({ message: 'The calendar is deleted.', statusCode: 400 }), { status: 400 })
+      }
+      return new Response(JSON.stringify({ events: calId === liveId ? [liveEvent] : [] }), { status: 200 })
+    }))
+
+    const env = { GHL_PIT: 'x', GHL_LOCATION_ID: 'loc' } as any
+    const out = await fetchApptEvents(env)
+    // The sweep did NOT throw, and the live calendar's event still made it through.
+    expect(out.map((e) => e.apptId)).toContain('appt_live')
+    // It attempted every calendar (including the dead one) — none aborted the loop.
+    expect((globalThis.fetch as any).mock.calls.length).toBe(CALENDARS.length)
   })
 })

@@ -14,12 +14,16 @@ export const CALENDARS: { id: string; name: string; role: CalendarRole }[] = [
   { id: 'd2HDmtzG0wCiqWMeFrds', name: 'Book 1-on-1 (Setters)', role: 'setter' },
   { id: '5h0vdmn85v3Jz3Dtnqlz', name: 'Jinnie Do - Strategy Call', role: 'discovery' },
   { id: 'X6pkh6ABh4q9LwidqrUu', name: 'CS Engagement Profile 1-on-1', role: 'other' },
-  { id: 'fAvNmgVsYU0phCdSEqKa', name: 'Leticia Kepka capital stack call', role: 'other' },
   { id: 'dKqEtBrVNnsepxHzBRID', name: 'CS Intro with Marcus', role: 'other' },
   { id: 'HWQ85pzELckLDNB9dVBl', name: 'CSC - Strategy Call', role: 'discovery' },
-  { id: 'UdtMa5slvvO6sJHn6ZGG', name: 'Kaylee Stevens - CSC Strategy Call', role: 'discovery' },
   { id: 'Q5JqZp8D14hSjxG8AqRz', name: 'CS Follow-up call', role: 'other' },
   // 'FN1aqzOK32FmdPKqmoUu' BLOCK and 'vzYmoC2CL9wAFnHbqbG6' Discovery Call (empty) excluded.
+  // DELETED 2026-07-21 when both setters left GHL (their calendars were removed, so
+  // /calendars/events returns 400 "calendar is deleted" for these ids — see fetchApptEvents):
+  //   'fAvNmgVsYU0phCdSEqKa' Leticia Kepka capital stack call
+  //   'UdtMa5slvvO6sJHn6ZGG' Kaylee Stevens - CSC Strategy Call
+  // Their past bookings stay attributed by booked_by_user_id via the synced users
+  // table (retains users seen since sync) + the HISTORICAL_NAMES fallback below.
 ]
 
 // Historical name fallbacks: bookers deleted in the 2026-06-16 user consolidation

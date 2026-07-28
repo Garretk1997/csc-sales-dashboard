@@ -93,9 +93,22 @@ export async function fetchApptEvents(env: Env, now = Date.now()): Promise<ApptE
   const endTime = String(now + WINDOW_FUTURE_DAYS * 24 * 3600 * 1000)
   const out: ApptEvent[] = []
   for (const cal of CALENDARS) {
-    const resp = await getJson(env, '/calendars/events', {
-      locationId: env.GHL_LOCATION_ID, calendarId: cal.id, startTime, endTime,
-    })
+    // Isolate each calendar: one failing calendar must NEVER abort the whole sweep.
+    // When a rep leaves, GHL DELETES their calendar and /calendars/events returns
+    // 400 "The calendar is deleted." for its id. Before this guard, that lone 400
+    // threw out of getJson and froze the entire appt_events mirror (this happened
+    // 2026-07-21 when two setters left and their calendars were removed). Skip the
+    // bad calendar and keep syncing the rest; if it were instead a systemic error
+    // (bad params/auth) every calendar would fail and out stays empty — harmless.
+    let resp: any
+    try {
+      resp = await getJson(env, '/calendars/events', {
+        locationId: env.GHL_LOCATION_ID, calendarId: cal.id, startTime, endTime,
+      })
+    } catch (err) {
+      console.error(`fetchApptEvents: skipping calendar ${cal.id} (${cal.name}): ${err instanceof Error ? err.message : String(err)}`)
+      continue
+    }
     for (const raw of resp?.events ?? []) {
       const ev = classifyAppt(raw, cal.role)
       if (ev) out.push(ev)
