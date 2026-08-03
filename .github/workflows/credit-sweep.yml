@@ -15,7 +15,9 @@ concurrency:
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Capped-write sweep normally finishes in ~5 min; a run that hits this
+    # timeout means something is wrong — investigate, don't raise it.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
